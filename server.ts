@@ -13,6 +13,21 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Every /api/* response carries per-session data (auth state, accounts,
+// activities). Some hosting setups sit behind a CDN/reverse-proxy that will
+// cache a GET response by URL alone and happily serve that cached copy to a
+// completely different browser/session — which looks exactly like "data
+// from another device/session leaking into mine" or "my new data never
+// shows up elsewhere". These headers explicitly forbid that at every layer
+// (browser, any intermediate proxy, and CDNs that respect Cache-Control).
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Vary', 'Cookie');
+  next();
+});
+
 // ---- Dashboard login (protects the whole app, not Reddit itself) ----
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
