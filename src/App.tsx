@@ -32,12 +32,36 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
 
+  // Primary State — starts empty; populated from the server once logged in,
+  // so we never briefly show stale/default data before the real data loads.
+  const [accounts, setAccounts] = useState<RedditAccount[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  const loadAppData = async () => {
+    setDataLoaded(false);
+    try {
+      const [loadedAccounts, loadedActivities] = await Promise.all([
+        loadSavedAccounts(),
+        loadSavedActivities(),
+      ]);
+      setAccounts(loadedAccounts);
+      setActivities(loadedActivities);
+    } finally {
+      setDataLoaded(true);
+    }
+  };
+
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
       .then((res) => res.json())
-      .then((data) => {
-        setIsAuthenticated(Boolean(data.authenticated));
+      .then(async (data) => {
+        const authed = Boolean(data.authenticated);
+        setIsAuthenticated(authed);
         setCurrentUsername(data.username || null);
+        if (authed) {
+          await loadAppData();
+        }
       })
       .catch(() => {
         // If we can't even reach the server's auth check, fail closed (show login)
@@ -46,9 +70,10 @@ export default function App() {
       .finally(() => setAuthChecked(true));
   }, []);
 
-  const handleLoginSuccess = (username: string) => {
+  const handleLoginSuccess = async (username: string) => {
     setIsAuthenticated(true);
     setCurrentUsername(username);
+    await loadAppData();
   };
 
   const handleLogout = async () => {
@@ -59,11 +84,12 @@ export default function App() {
     }
     setIsAuthenticated(false);
     setCurrentUsername(null);
+    setDataLoaded(false);
+    setAccounts([]);
+    setActivities([]);
   };
 
-  // Primary State
-  const [accounts, setAccounts] = useState<RedditAccount[]>(() => loadSavedAccounts());
-  const [activities, setActivities] = useState<ActivityItem[]>(() => loadSavedActivities());
+  // Remaining Primary State
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(30); // 30s default
@@ -119,14 +145,18 @@ export default function App() {
     sortOrder: 'desc',
   });
 
-  // Save to LocalStorage whenever accounts or activities change
+  // Save to the server whenever accounts or activities change (but not
+  // before the initial load finishes, which would overwrite server data
+  // with the empty placeholder state).
   useEffect(() => {
+    if (!dataLoaded) return;
     saveAccountsToStorage(accounts);
-  }, [accounts]);
+  }, [accounts, dataLoaded]);
 
   useEffect(() => {
+    if (!dataLoaded) return;
     saveActivitiesToStorage(activities);
-  }, [activities]);
+  }, [activities, dataLoaded]);
 
   // Always-current accounts reference, so an in-flight sync (which can take
   // a second or more per Reddit request) never overwrites a deletion that
@@ -312,8 +342,6 @@ export default function App() {
   const handleResetToDefault = () => {
     setAccounts(INITIAL_ACCOUNTS);
     setActivities(INITIAL_ACTIVITIES);
-    saveAccountsToStorage(INITIAL_ACCOUNTS);
-    saveActivitiesToStorage(INITIAL_ACTIVITIES);
     showToast('Data reset to default LitNuke X ANUMA preset.');
   };
 
@@ -472,7 +500,7 @@ export default function App() {
     });
   };
 
-  if (!authChecked) {
+  if (!authChecked || (isAuthenticated && !dataLoaded)) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-slate-500 text-sm font-mono">Loading...</div>

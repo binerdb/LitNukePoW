@@ -1,15 +1,17 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import { INITIAL_ACCOUNTS, INITIAL_ACTIVITIES } from './src/data/initialAccounts';
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ---- Dashboard login (protects the whole app, not Reddit itself) ----
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || '';
@@ -300,6 +302,81 @@ async function fetchRedditEndpoint(endpoint: string) {
 // Health check endpoint
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'LitNuke X ANUMA Tracker', time: new Date().toISOString() });
+});
+
+// ---- Server-side data persistence (accounts & activities) ----
+// Previously this data lived only in the browser's localStorage, which is
+// scoped per-browser/device — switching browsers or devices meant the app
+// looked "empty" and fell back to the built-in sample data. Storing it here
+// instead means every browser hitting this same server sees the same data.
+//
+// NOTE: this writes to a local JSON file on disk. On most containerized
+// hosts (including Railway without a mounted Volume) the filesystem is
+// reset on every redeploy — this survives server restarts within the same
+// deployment, but NOT a fresh deploy. For that, mount a persistent Volume
+// at DATA_DIR, or swap this for a real database.
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+const ACTIVITIES_FILE = path.join(DATA_DIR, 'activities.json');
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function readJsonFile<T>(filePath: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.warn(`[Data] Failed to read ${filePath}, using fallback:`, err);
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath: string, data: unknown) {
+  ensureDataDir();
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+app.get('/api/data/accounts', requireAuth, (_req, res) => {
+  const accounts = readJsonFile(ACCOUNTS_FILE, INITIAL_ACCOUNTS);
+  res.json({ success: true, accounts });
+});
+
+app.post('/api/data/accounts', requireAuth, (req, res) => {
+  const accounts = req.body;
+  if (!Array.isArray(accounts)) {
+    return res.status(400).json({ success: false, message: 'accounts must be an array.' });
+  }
+  try {
+    writeJsonFile(ACCOUNTS_FILE, accounts);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Data] Failed to save accounts:', err);
+    res.status(500).json({ success: false, message: 'Failed to save accounts on the server.' });
+  }
+});
+
+app.get('/api/data/activities', requireAuth, (_req, res) => {
+  const activities = readJsonFile(ACTIVITIES_FILE, INITIAL_ACTIVITIES);
+  res.json({ success: true, activities });
+});
+
+app.post('/api/data/activities', requireAuth, (req, res) => {
+  const activities = req.body;
+  if (!Array.isArray(activities)) {
+    return res.status(400).json({ success: false, message: 'activities must be an array.' });
+  }
+  try {
+    writeJsonFile(ACTIVITIES_FILE, activities);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Data] Failed to save activities:', err);
+    res.status(500).json({ success: false, message: 'Failed to save activities on the server.' });
+  }
 });
 
 // Fetch Reddit user profile info

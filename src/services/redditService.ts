@@ -2,54 +2,67 @@ import { RedditAccount, ActivityItem } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_ACTIVITIES } from '../data/initialAccounts';
 import { isSubredditMatch, normalizeSubreddit } from '../utils/formatters';
 
-const STORAGE_ACCOUNTS_KEY = 'litnuke_anuma_accounts_v1';
-const STORAGE_ACTIVITIES_KEY = 'litnuke_anuma_activities_v1';
+// Data lives on the server (see /api/data/*), not in localStorage — that way
+// the same accounts/activities show up regardless of which browser or
+// device you're using, as long as you're logged into the same server.
 
-export function loadSavedAccounts(): RedditAccount[] {
+export async function loadSavedAccounts(): Promise<RedditAccount[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_ACCOUNTS_KEY);
-    if (raw !== null) {
-      const parsed = JSON.parse(raw);
-      // Respect an intentionally emptied list (all accounts deleted) rather
-      // than treating "0 items" the same as "nothing saved yet".
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
+    const res = await fetch('/api/data/accounts', { credentials: 'include' });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data = await res.json();
+    if (data.success && Array.isArray(data.accounts)) {
+      return data.accounts;
     }
   } catch (e) {
-    console.error('Failed to parse saved accounts:', e);
+    console.error('Failed to load accounts from server:', e);
   }
   return INITIAL_ACCOUNTS;
 }
 
-export function saveAccountsToStorage(accounts: RedditAccount[]) {
+export async function saveAccountsToStorage(accounts: RedditAccount[]): Promise<boolean> {
   try {
-    localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts));
+    const res = await fetch('/api/data/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(accounts),
+    });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    return true;
   } catch (e) {
-    console.error('Failed to save accounts to storage:', e);
+    console.error('Failed to save accounts to server:', e);
+    return false;
   }
 }
 
-export function loadSavedActivities(): ActivityItem[] {
+export async function loadSavedActivities(): Promise<ActivityItem[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_ACTIVITIES_KEY);
-    if (raw !== null) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
+    const res = await fetch('/api/data/activities', { credentials: 'include' });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data = await res.json();
+    if (data.success && Array.isArray(data.activities)) {
+      return data.activities;
     }
   } catch (e) {
-    console.error('Failed to parse saved activities:', e);
+    console.error('Failed to load activities from server:', e);
   }
   return INITIAL_ACTIVITIES;
 }
 
-export function saveActivitiesToStorage(activities: ActivityItem[]) {
+export async function saveActivitiesToStorage(activities: ActivityItem[]): Promise<boolean> {
   try {
-    localStorage.setItem(STORAGE_ACTIVITIES_KEY, JSON.stringify(activities));
+    const res = await fetch('/api/data/activities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(activities),
+    });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    return true;
   } catch (e) {
-    console.error('Failed to save activities to storage:', e);
+    console.error('Failed to save activities to server:', e);
+    return false;
   }
 }
 
