@@ -364,6 +364,15 @@ export default function App() {
     showToast('Data reset to default LitNuke X ANUMA preset.');
   };
 
+  // Wipe everything — accounts and activities both — down to a clean slate.
+  // Unlike Reset to Default, this does NOT bring back the built-in preset;
+  // it leaves both arrays empty so the app starts from zero.
+  const handleClearAllData = () => {
+    setAccounts([]);
+    setActivities([]);
+    showToast('All accounts and activities cleared.');
+  };
+
   // Available unique subreddits for filtering
   const availableSubreddits = useMemo(() => {
     const subs = new Set<string>();
@@ -621,6 +630,7 @@ export default function App() {
         onUpdateAccount={handleUpdateAccount}
         onDeleteAccount={handleDeleteAccount}
         onResetToDefault={handleResetToDefault}
+        onClearAllData={handleClearAllData}
         autoRefreshInterval={autoRefreshInterval}
         onSetAutoRefreshInterval={setAutoRefreshInterval}
       />

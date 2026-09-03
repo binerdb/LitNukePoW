@@ -28,6 +28,7 @@ interface AccountSettingsModalProps {
   onUpdateAccount: (id: string, updates: Partial<RedditAccount>) => void;
   onDeleteAccount: (id: string) => void;
   onResetToDefault: () => void;
+  onClearAllData: () => void;
   autoRefreshInterval: number;
   onSetAutoRefreshInterval: (seconds: number) => void;
 }
@@ -40,6 +41,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({
   onUpdateAccount,
   onDeleteAccount,
   onResetToDefault,
+  onClearAllData,
   autoRefreshInterval,
   onSetAutoRefreshInterval,
 }) => {
@@ -524,6 +526,24 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({
             >
               <RotateCcw className="w-3 h-3" />
               <span>[Reset to Default]</span>
+            </button>
+          </div>
+
+          {/* Clear Everything */}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs text-slate-500">
+            <span>Wipe all accounts and activities completely?</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('This deletes ALL accounts and ALL activities — no preset, just empty. This cannot be undone. Continue?')) {
+                  onClearAllData();
+                  resetForm();
+                }
+              }}
+              className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400 transition-colors font-mono"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>[Clear All Data]</span>
             </button>
           </div>
 
