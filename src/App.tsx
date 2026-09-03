@@ -38,6 +38,15 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
+  // Guards against the "reload race": right after a fresh GET from the
+  // server, we must NOT immediately POST that same data back. If that
+  // redundant POST is slow, it can land after a newer save (from another
+  // tab/device, or from an in-flight sync) and silently overwrite it with
+  // the older data we just fetched. These flags make the very next
+  // accounts/activities-changed effect a no-op exactly once per load.
+  const skipNextAccountsSaveRef = React.useRef(false);
+  const skipNextActivitiesSaveRef = React.useRef(false);
+
   const loadAppData = async () => {
     setDataLoaded(false);
     try {
@@ -45,6 +54,8 @@ export default function App() {
         loadSavedAccounts(),
         loadSavedActivities(),
       ]);
+      skipNextAccountsSaveRef.current = true;
+      skipNextActivitiesSaveRef.current = true;
       setAccounts(loadedAccounts);
       setActivities(loadedActivities);
     } finally {
@@ -150,11 +161,19 @@ export default function App() {
   // with the empty placeholder state).
   useEffect(() => {
     if (!dataLoaded) return;
+    if (skipNextAccountsSaveRef.current) {
+      skipNextAccountsSaveRef.current = false;
+      return;
+    }
     saveAccountsToStorage(accounts);
   }, [accounts, dataLoaded]);
 
   useEffect(() => {
     if (!dataLoaded) return;
+    if (skipNextActivitiesSaveRef.current) {
+      skipNextActivitiesSaveRef.current = false;
+      return;
+    }
     saveActivitiesToStorage(activities);
   }, [activities, dataLoaded]);
 
