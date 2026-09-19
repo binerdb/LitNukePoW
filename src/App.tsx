@@ -220,10 +220,29 @@ export default function App() {
 
       if (fetchedActivities.length > 0) {
         setActivities((prev) => {
-          const existingIds = new Set(prev.map((i) => i.id));
-          const fresh = fetchedActivities.filter((i) => !existingIds.has(i.id));
-          newItemsFound = fresh.length;
-          return [...fresh, ...prev];
+          const fetchedById = new Map(fetchedActivities.map((i) => [i.id, i]));
+          let newCount = 0;
+
+          // Update the live-changing fields (score/upvotes, comment count,
+          // upvote ratio) on posts/comments we already have, instead of
+          // freezing them at whatever value they had on first sync.
+          const updated = prev.map((existing) => {
+            const fresh = fetchedById.get(existing.id);
+            if (!fresh) return existing;
+            fetchedById.delete(existing.id); // mark as handled, not "new"
+            return {
+              ...existing,
+              score: fresh.score,
+              upvoteRatio: fresh.upvoteRatio,
+              numComments: fresh.numComments,
+            };
+          });
+
+          // Whatever's left in fetchedById is genuinely new — prepend it.
+          const fresh = Array.from(fetchedById.values());
+          newCount = fresh.length;
+          newItemsFound = newCount;
+          return [...fresh, ...updated];
         });
       }
 
