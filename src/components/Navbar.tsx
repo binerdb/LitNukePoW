@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, RefreshCw, Plus, LogOut, Printer } from 'lucide-react';
+import { Settings, RefreshCw, Plus, LogOut, Printer, TrendingUp } from 'lucide-react';
 import { GlobalStats } from '../types';
 
 interface NavbarProps {
@@ -13,6 +13,7 @@ interface NavbarProps {
   currentUsername?: string | null;
   onLogout: () => void;
   onPrintReport: () => void;
+  onOpenGeoReport: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -26,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUsername,
   onLogout,
   onPrintReport,
+  onOpenGeoReport,
 }) => {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900/95 backdrop-blur-md">
@@ -120,6 +122,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-600 text-[9px] font-bold text-white font-mono">
                 {stats.totalAccounts}
               </span>
+            </button>
+
+            {/* GEO / AIO Report Button */}
+            <button
+              id="btn-geo-report"
+              onClick={onOpenGeoReport}
+              title="GEO / AIO brand visibility report"
+              className="p-2 text-slate-400 hover:text-orange-400 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors"
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span className="sr-only">GEO Report</span>
             </button>
 
             {/* Print Report Button */}

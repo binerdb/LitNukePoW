@@ -78,3 +78,26 @@ export interface FilterState {
   sortField: SortField;
   sortOrder: SortOrder;
 }
+
+// --- GEO / AIO brand-visibility monitoring ---
+// Independent checks against AI engines (do they mention the brand when
+// asked relevant questions?) — unrelated to, and never fed by, Reddit
+// account activity.
+export type GeoEngine = 'chatgpt' | 'perplexity';
+
+export interface GeoConfig {
+  brand: string;
+  engines: Record<GeoEngine, boolean>; // whether each engine's API key is configured
+}
+
+export interface GeoResult {
+  id: string;
+  runId: string;
+  runAt: string; // ISO timestamp
+  prompt: string;
+  engine: GeoEngine;
+  mentioned: boolean;
+  snippet: string | null;
+  rawAnswer: string;
+  error?: string;
+}

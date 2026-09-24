@@ -394,6 +394,167 @@ app.post('/api/data/activities', requireAuth, (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GEO / AIO monitoring: independent brand-visibility checks against AI
+// engines (ChatGPT, Perplexity). This queries each engine with the person's
+// own prompts and simply records whether/how the brand is mentioned in the
+// *live, organic* answer — nothing here posts, seeds, or otherwise tries to
+// influence what these engines say. It reads Reddit account data.
+// ---------------------------------------------------------------------------
+const GEO_PROMPTS_FILE = path.join(DATA_DIR, 'geo_prompts.json');
+const GEO_RESULTS_FILE = path.join(DATA_DIR, 'geo_results.json');
+const BRAND_NAME = process.env.GEO_BRAND_NAME || 'ANUMA AI';
+
+interface GeoEngineResult {
+  engine: 'chatgpt' | 'perplexity';
+  mentioned: boolean;
+  snippet: string | null;
+  rawAnswer: string;
+  error?: string;
+}
+
+function findBrandSnippet(text: string, brand: string): string | null {
+  const idx = text.toLowerCase().indexOf(brand.toLowerCase());
+  if (idx === -1) return null;
+  const start = Math.max(0, idx - 80);
+  const end = Math.min(text.length, idx + brand.length + 80);
+  return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
+}
+
+async function queryChatGPT(prompt: string): Promise<GeoEngineResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: 'OPENAI_API_KEY is not set.' };
+  }
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+      }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+    }
+    const data = await response.json();
+    const answer: string = data?.choices?.[0]?.message?.content || '';
+    return {
+      engine: 'chatgpt',
+      mentioned: answer.toLowerCase().includes(BRAND_NAME.toLowerCase()),
+      snippet: findBrandSnippet(answer, BRAND_NAME),
+      rawAnswer: answer,
+    };
+  } catch (err: any) {
+    return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: err.message };
+  }
+}
+
+async function queryPerplexity(prompt: string): Promise<GeoEngineResult> {
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) {
+    return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: 'PERPLEXITY_API_KEY is not set.' };
+  }
+  try {
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.PERPLEXITY_MODEL || 'sonar',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+    }
+    const data = await response.json();
+    const answer: string = data?.choices?.[0]?.message?.content || '';
+    return {
+      engine: 'perplexity',
+      mentioned: answer.toLowerCase().includes(BRAND_NAME.toLowerCase()),
+      snippet: findBrandSnippet(answer, BRAND_NAME),
+      rawAnswer: answer,
+    };
+  } catch (err: any) {
+    return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: err.message };
+  }
+}
+
+// Which engines are usable right now (i.e. which API keys are configured).
+app.get('/api/geo/config', requireAuth, (_req, res) => {
+  res.json({
+    success: true,
+    brand: BRAND_NAME,
+    engines: {
+      chatgpt: Boolean(process.env.OPENAI_API_KEY),
+      perplexity: Boolean(process.env.PERPLEXITY_API_KEY),
+    },
+  });
+});
+
+// Manage the list of prompts to test (e.g. "best AI tools for X", "how do I do Y").
+app.get('/api/geo/prompts', requireAuth, (_req, res) => {
+  const prompts = readJsonFile<string[]>(GEO_PROMPTS_FILE, []);
+  res.json({ success: true, prompts });
+});
+
+app.post('/api/geo/prompts', requireAuth, (req, res) => {
+  const prompts = req.body;
+  if (!Array.isArray(prompts) || !prompts.every((p) => typeof p === 'string')) {
+    return res.status(400).json({ success: false, message: 'prompts must be an array of strings.' });
+  }
+  writeJsonFile(GEO_PROMPTS_FILE, prompts);
+  res.json({ success: true });
+});
+
+// Historical results (each "run" = one prompt checked against all configured engines, once).
+app.get('/api/geo/results', requireAuth, (_req, res) => {
+  const results = readJsonFile(GEO_RESULTS_FILE, []);
+  res.json({ success: true, results });
+});
+
+// Run every stored prompt against every configured engine, right now, and
+// append the results (each stamped with the current time) to history.
+app.post('/api/geo/run', requireAuth, async (_req, res) => {
+  const prompts = readJsonFile<string[]>(GEO_PROMPTS_FILE, []);
+  if (prompts.length === 0) {
+    return res.status(400).json({ success: false, message: 'No prompts configured yet. Add at least one prompt first.' });
+  }
+
+  const hasChatGPT = Boolean(process.env.OPENAI_API_KEY);
+  const hasPerplexity = Boolean(process.env.PERPLEXITY_API_KEY);
+  if (!hasChatGPT && !hasPerplexity) {
+    return res.status(400).json({
+      success: false,
+      message: 'No AI engine is configured. Set OPENAI_API_KEY and/or PERPLEXITY_API_KEY.',
+    });
+  }
+
+  const runId = `run-${Date.now()}`;
+  const runAt = new Date().toISOString();
+  const newResults: any[] = [];
+
+  for (const prompt of prompts) {
+    const engineChecks: Promise<GeoEngineResult>[] = [];
+    if (hasChatGPT) engineChecks.push(queryChatGPT(prompt));
+    if (hasPerplexity) engineChecks.push(queryPerplexity(prompt));
+    const engineResults = await Promise.all(engineChecks);
+    for (const er of engineResults) {
+      newResults.push({ id: `${runId}-${prompt}-${er.engine}`, runId, runAt, prompt, ...er });
+    }
+  }
+
+  const existing = readJsonFile<any[]>(GEO_RESULTS_FILE, []);
+  const merged = [...newResults, ...existing].slice(0, 2000); // cap history size
+  writeJsonFile(GEO_RESULTS_FILE, merged);
+
+  res.json({ success: true, runId, runAt, resultsAdded: newResults.length, results: newResults });
+});
+
 // Fetch Reddit user profile info
 app.get('/api/reddit/user/:username/about', requireAuth, async (req, res) => {
   const cleanUsername = req.params.username.replace(/^(u\/|r\/|@)/, '').trim();

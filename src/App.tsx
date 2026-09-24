@@ -8,6 +8,7 @@ import { AccountSettingsModal } from './components/AccountSettingsModal';
 import { PostPreviewModal } from './components/PostPreviewModal';
 import { LoginPage } from './components/LoginPage';
 import { PrintReport, PrintRequest } from './components/PrintReport';
+import { GeoReportModal } from './components/GeoReportModal';
 import { 
   RedditAccount, 
   ActivityItem, 
@@ -118,6 +119,7 @@ export default function App() {
   const [printRequest, setPrintRequest] = useState<PrintRequest | null>(null);
 
   const handlePrintGlobalReport = () => setPrintRequest({ mode: 'global' });
+  const [isGeoReportOpen, setIsGeoReportOpen] = useState(false);
   const handlePrintPersonaReport = (account: RedditAccount) => setPrintRequest({ mode: 'persona', account });
 
   // Once a report is mounted, wait for it to paint, then hand off to the
@@ -573,6 +575,7 @@ export default function App() {
         currentUsername={currentUsername}
         onLogout={handleLogout}
         onPrintReport={handlePrintGlobalReport}
+        onOpenGeoReport={() => setIsGeoReportOpen(true)}
       />
 
       {/* Main Container */}
@@ -682,6 +685,8 @@ export default function App() {
       {printRequest && (
         <PrintReport request={printRequest} accounts={accounts} activities={activities} />
       )}
+
+      {isGeoReportOpen && <GeoReportModal onClose={() => setIsGeoReportOpen(false)} />}
     </div>
   );
 }
