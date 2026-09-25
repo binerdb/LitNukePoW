@@ -38,3 +38,20 @@ export async function runGeoCheck(): Promise<{ resultsAdded: number; results: Ge
   if (!data.success) throw new Error(data.message || 'Failed to run GEO check.');
   return { resultsAdded: data.resultsAdded, results: data.results };
 }
+
+// Wipe all stored GEO results (e.g. to start clean after a batch of errors).
+export async function clearGeoResults(): Promise<void> {
+  const res = await fetch('/api/geo/results', { method: 'DELETE', credentials: 'include' });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message || 'Failed to clear results.');
+}
+
+// Remove a single GEO result entry.
+export async function deleteGeoResult(id: string): Promise<void> {
+  const res = await fetch(`/api/geo/results/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message || 'Failed to delete result.');
+}

@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Trash2, Play, Loader2, TrendingUp, Bot, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { X, Plus, Trash2, Play, Loader2, TrendingUp, Bot, AlertCircle, CheckCircle2, XCircle, RotateCcw } from 'lucide-react';
 import { GeoConfig, GeoResult } from '../types';
-import { fetchGeoConfig, fetchGeoPrompts, saveGeoPrompts, fetchGeoResults, runGeoCheck } from '../services/geoService';
+import {
+  fetchGeoConfig,
+  fetchGeoPrompts,
+  saveGeoPrompts,
+  fetchGeoResults,
+  runGeoCheck,
+  clearGeoResults,
+  deleteGeoResult,
+} from '../services/geoService';
 
 interface GeoReportModalProps {
   onClose: () => void;
@@ -94,6 +102,32 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
       setError(e.message || 'Failed to run GEO check.');
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const [isClearing, setIsClearing] = useState(false);
+  const handleClearAll = async () => {
+    if (!confirm('Delete ALL stored GEO check results? This cannot be undone.')) return;
+    setIsClearing(true);
+    setError(null);
+    try {
+      await clearGeoResults();
+      setResults([]);
+    } catch (e: any) {
+      setError(e.message || 'Failed to clear results.');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handleDeleteResult = async (id: string) => {
+    const prevResults = results;
+    setResults((prev) => prev.filter((r) => r.id !== id)); // optimistic
+    try {
+      await deleteGeoResult(id);
+    } catch (e: any) {
+      setResults(prevResults); // revert on failure
+      setError(e.message || 'Failed to delete result.');
     }
   };
 
@@ -423,10 +457,26 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
 
               {/* Results log */}
               <div>
-                <h3 className="text-xs font-bold text-slate-300 mb-2">Recent Results</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-bold text-slate-300">Recent Results</h3>
+                  {results.length > 0 && (
+                    <button
+                      onClick={handleClearAll}
+                      disabled={isClearing}
+                      className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+                    >
+                      {isClearing ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3 h-3" />
+                      )}
+                      Reset all results
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-2">
                   {results.slice(0, 30).map((r) => (
-                    <div key={r.id} className="p-3 rounded-lg bg-slate-800/30">
+                    <div key={r.id} className="p-3 rounded-lg bg-slate-800/30 group">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <div className="flex items-center gap-2">
                           {r.error ? (
@@ -440,9 +490,18 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
                             {engineLabel[r.engine] || r.engine}
                           </span>
                         </div>
-                        <span className="text-[10px] text-slate-600 font-mono">
-                          {new Date(r.runAt).toLocaleString()}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-600 font-mono">
+                            {new Date(r.runAt).toLocaleString()}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteResult(r.id)}
+                            title="Delete this result"
+                            className="text-slate-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                       <p className="text-xs text-slate-300">{r.prompt}</p>
                       {r.error ? (

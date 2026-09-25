@@ -596,6 +596,22 @@ app.get('/api/geo/results', requireAuth, (_req, res) => {
   res.json({ success: true, results });
 });
 
+// Wipe all stored results — e.g. to start clean after a batch of failed
+// checks (bad model id, expired key, etc.) rather than having them clutter
+// history and skew the KPIs forever.
+app.delete('/api/geo/results', requireAuth, (_req, res) => {
+  writeJsonFile(GEO_RESULTS_FILE, []);
+  res.json({ success: true });
+});
+
+// Remove one specific result entry by id.
+app.delete('/api/geo/results/:id', requireAuth, (req, res) => {
+  const results = readJsonFile<any[]>(GEO_RESULTS_FILE, []);
+  const filtered = results.filter((r) => r.id !== req.params.id);
+  writeJsonFile(GEO_RESULTS_FILE, filtered);
+  res.json({ success: true, removed: results.length - filtered.length });
+});
+
 // Run every stored prompt against every configured engine, right now, and
 // append the results (each stamped with the current time) to history.
 app.post('/api/geo/run', requireAuth, async (_req, res) => {
