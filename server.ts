@@ -483,18 +483,60 @@ async function queryGroqSearch(prompt: string): Promise<GeoEngineResult> {
   return queryGroqModel(prompt, 'groq-search', process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b', true);
 }
 
-// NOTE: Google also retires Gemini model ids as newer versions ship (e.g.
-// gemini-2.0-flash was retired in favor of a gemini-3.x model). If this
-// starts erroring with "is no longer available", the error message itself
-// names the current replacement — update GEMINI_MODEL to match, or check
-// https://ai.google.dev/gemini-api/docs/models for the current lineup.
+// Google renames/retires Gemini model ids frequently (multiple Flash
+// versions have shipped and been retired within the same year), so
+// hardcoding one id is fragile. Instead, if GEMINI_MODEL isn't explicitly
+// pinned via env var, ask Gemini's own ListModels endpoint which models are
+// currently live and pick a sensible "flash" one automatically. Cached for
+// an hour so we're not calling ListModels on every single prompt.
+let cachedGeminiModel: { id: string; resolvedAt: number } | null = null;
+const GEMINI_MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
+
+async function resolveGeminiModel(apiKey: string): Promise<string> {
+  const pinned = process.env.GEMINI_MODEL;
+  if (pinned) return pinned;
+
+  if (cachedGeminiModel && Date.now() - cachedGeminiModel.resolvedAt < GEMINI_MODEL_CACHE_TTL_MS) {
+    return cachedGeminiModel.id;
+  }
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  if (!response.ok) {
+    throw new Error(`Could not list Gemini models (HTTP ${response.status}).`);
+  }
+  const data = await response.json();
+  const models: any[] = data?.models || [];
+
+  const candidates = models
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => (m.name || '').replace(/^models\//, ''))
+    .filter((id) => id);
+
+  // Prefer a plain, stable "flash" text model — skip lite/image/audio/live/
+  // embedding/preview/experimental variants, which are narrower or unstable.
+  const flashStable = candidates.find(
+    (id) =>
+      /flash/i.test(id) &&
+      !/(lite|image|audio|live|embed|tts|vision|preview|exp)/i.test(id)
+  );
+  const anyFlash = candidates.find((id) => /flash/i.test(id) && !/(image|audio|live|embed|tts|vision)/i.test(id));
+  const resolved = flashStable || anyFlash || candidates[0];
+
+  if (!resolved) {
+    throw new Error('No Gemini model supporting generateContent was found on this API key.');
+  }
+
+  cachedGeminiModel = { id: resolved, resolvedAt: Date.now() };
+  return resolved;
+}
+
 async function queryGemini(prompt: string): Promise<GeoEngineResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: 'GEMINI_API_KEY is not set.' };
   }
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-3.0-flash';
+    const model = await resolveGeminiModel(apiKey);
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
