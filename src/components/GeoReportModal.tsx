@@ -207,9 +207,8 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
               GEO / AIO Visibility Report
             </h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Independent checks of what AI engines say about{' '}
-              <span className="text-orange-400 font-semibold">{config?.brand || 'the brand'}</span> — not connected
-              to Reddit account data.
+              Checks what AI engines say about{' '}
+              <span className="text-orange-400 font-semibold">{config?.brand || 'the brand'}</span>
             </p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
