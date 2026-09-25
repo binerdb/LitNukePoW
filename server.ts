@@ -463,12 +463,12 @@ async function queryGroqModel(
 
 // General assistant check (no browsing) — stands in for "ChatGPT".
 async function queryGroq(prompt: string): Promise<GeoEngineResult> {
-  return queryGroqModel(prompt, 'groq', process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
+  return queryGroqModel(prompt, 'groq', process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
 }
 
 // Web-search-grounded check (Groq's built-in browsing) — stands in for "Perplexity".
 async function queryGroqSearch(prompt: string): Promise<GeoEngineResult> {
-  return queryGroqModel(prompt, 'groq-search', process.env.GROQ_SEARCH_MODEL || 'groq/compound');
+  return queryGroqModel(prompt, 'browser_search', process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b');
 }
 
 async function queryGemini(prompt: string): Promise<GeoEngineResult> {
@@ -477,7 +477,7 @@ async function queryGemini(prompt: string): Promise<GeoEngineResult> {
     return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: 'GEMINI_API_KEY is not set.' };
   }
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
