@@ -406,7 +406,7 @@ const GEO_RESULTS_FILE = path.join(DATA_DIR, 'geo_results.json');
 const BRAND_NAME = process.env.GEO_BRAND_NAME || 'ANUMA AI';
 
 interface GeoEngineResult {
-  engine: 'chatgpt' | 'perplexity';
+  engine: 'chatgpt' | 'perplexity' | 'gemini';
   mentioned: boolean;
   snippet: string | null;
   rawAnswer: string;
@@ -484,6 +484,38 @@ async function queryPerplexity(prompt: string): Promise<GeoEngineResult> {
   }
 }
 
+async function queryGemini(prompt: string): Promise<GeoEngineResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: 'GEMINI_API_KEY is not set.' };
+  }
+  try {
+    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    );
+    if (!response.ok) {
+      const errText = await response.text();
+      return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+    }
+    const data = await response.json();
+    const answer: string = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return {
+      engine: 'gemini',
+      mentioned: answer.toLowerCase().includes(BRAND_NAME.toLowerCase()),
+      snippet: findBrandSnippet(answer, BRAND_NAME),
+      rawAnswer: answer,
+    };
+  } catch (err: any) {
+    return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: err.message };
+  }
+}
+
 // Which engines are usable right now (i.e. which API keys are configured).
 app.get('/api/geo/config', requireAuth, (_req, res) => {
   res.json({
@@ -492,6 +524,7 @@ app.get('/api/geo/config', requireAuth, (_req, res) => {
     engines: {
       chatgpt: Boolean(process.env.OPENAI_API_KEY),
       perplexity: Boolean(process.env.PERPLEXITY_API_KEY),
+      gemini: Boolean(process.env.GEMINI_API_KEY),
     },
   });
 });
@@ -527,10 +560,11 @@ app.post('/api/geo/run', requireAuth, async (_req, res) => {
 
   const hasChatGPT = Boolean(process.env.OPENAI_API_KEY);
   const hasPerplexity = Boolean(process.env.PERPLEXITY_API_KEY);
-  if (!hasChatGPT && !hasPerplexity) {
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY);
+  if (!hasChatGPT && !hasPerplexity && !hasGemini) {
     return res.status(400).json({
       success: false,
-      message: 'No AI engine is configured. Set OPENAI_API_KEY and/or PERPLEXITY_API_KEY.',
+      message: 'No AI engine is configured. Set OPENAI_API_KEY, PERPLEXITY_API_KEY, and/or GEMINI_API_KEY.',
     });
   }
 
@@ -542,6 +576,7 @@ app.post('/api/geo/run', requireAuth, async (_req, res) => {
     const engineChecks: Promise<GeoEngineResult>[] = [];
     if (hasChatGPT) engineChecks.push(queryChatGPT(prompt));
     if (hasPerplexity) engineChecks.push(queryPerplexity(prompt));
+    if (hasGemini) engineChecks.push(queryGemini(prompt));
     const engineResults = await Promise.all(engineChecks);
     for (const er of engineResults) {
       newResults.push({ id: `${runId}-${prompt}-${er.engine}`, runId, runAt, prompt, ...er });

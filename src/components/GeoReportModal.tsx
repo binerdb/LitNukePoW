@@ -10,7 +10,30 @@ interface GeoReportModalProps {
 const engineLabel: Record<string, string> = {
   chatgpt: 'ChatGPT',
   perplexity: 'Perplexity',
+  gemini: 'Gemini',
 };
+
+const engineColor: Record<string, string> = {
+  chatgpt: '#fb923c', // orange
+  perplexity: '#60a5fa', // blue
+  gemini: '#34d399', // emerald
+};
+
+type TimeRangeKey = '7d' | '30d' | '90d' | 'all';
+const timeRangeOptions: { key: TimeRangeKey; label: string; days: number | null }[] = [
+  { key: '7d', label: '7D', days: 7 },
+  { key: '30d', label: '30D', days: 30 },
+  { key: '90d', label: '90D', days: 90 },
+  { key: 'all', label: 'All', days: null },
+];
+
+interface RunPoint {
+  runId: string;
+  runAt: string;
+  total: number;
+  mentioned: number;
+  byEngine: Record<string, { total: number; mentioned: number }>;
+}
 
 export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
   const [config, setConfig] = useState<GeoConfig | null>(null);
@@ -20,6 +43,7 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRangeKey>('30d');
 
   useEffect(() => {
     (async () => {
@@ -73,6 +97,15 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
     }
   };
 
+  // Results within the selected time window (KPIs, chart, and the results
+  // log below all respect this filter).
+  const filteredResults = useMemo(() => {
+    const opt = timeRangeOptions.find((o) => o.key === timeRange);
+    if (!opt || opt.days === null) return results;
+    const cutoff = Date.now() - opt.days * 24 * 60 * 60 * 1000;
+    return results.filter((r) => new Date(r.runAt).getTime() >= cutoff);
+  }, [results, timeRange]);
+
   // --- KPIs ---
   interface EngineStat {
     total: number;
@@ -86,17 +119,79 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
     lastRun: string | null;
   }>(() => {
     const byEngine: Record<string, EngineStat> = {};
-    for (const r of results) {
+    for (const r of filteredResults) {
       if (!byEngine[r.engine]) byEngine[r.engine] = { total: 0, mentioned: 0 };
       byEngine[r.engine].total += 1;
       if (r.mentioned) byEngine[r.engine].mentioned += 1;
     }
-    const totalChecks = results.length;
-    const totalMentions = results.filter((r) => r.mentioned).length;
+    const totalChecks = filteredResults.length;
+    const totalMentions = filteredResults.filter((r) => r.mentioned).length;
     const overallRate = totalChecks > 0 ? Math.round((totalMentions / totalChecks) * 100) : 0;
-    const lastRun = results.length > 0 ? results[0].runAt : null;
+    const lastRun = results.length > 0 ? results[0].runAt : null; // always show the true last run, unfiltered
     return { byEngine, totalChecks, totalMentions, overallRate, lastRun };
-  }, [results]);
+  }, [filteredResults, results]);
+
+  // --- Trend: one point per run, within the selected time window ---
+  const trend = useMemo<RunPoint[]>(() => {
+    const byRun = new Map<string, RunPoint>();
+    for (const r of filteredResults) {
+      if (!byRun.has(r.runId)) {
+        byRun.set(r.runId, { runId: r.runId, runAt: r.runAt, total: 0, mentioned: 0, byEngine: {} });
+      }
+      const entry = byRun.get(r.runId)!;
+      entry.total += 1;
+      if (r.mentioned) entry.mentioned += 1;
+      if (!entry.byEngine[r.engine]) entry.byEngine[r.engine] = { total: 0, mentioned: 0 };
+      entry.byEngine[r.engine].total += 1;
+      if (r.mentioned) entry.byEngine[r.engine].mentioned += 1;
+    }
+    return Array.from(byRun.values()).sort((a, b) => new Date(a.runAt).getTime() - new Date(b.runAt).getTime());
+  }, [filteredResults]);
+
+  const engineKeysInTrend = useMemo(() => {
+    const keys = new Set<string>();
+    trend.forEach((t) => Object.keys(t.byEngine).forEach((k) => keys.add(k)));
+    return Array.from(keys);
+  }, [trend]);
+
+  // --- Build SVG line-chart geometry for the trend above ---
+  const chart = useMemo(() => {
+    const width = 600;
+    const height = 160;
+    const padX = 8;
+    const padY = 14;
+    const n = trend.length;
+
+    const xFor = (i: number) => (n <= 1 ? width / 2 : padX + (i * (width - padX * 2)) / (n - 1));
+    const yFor = (rate: number) => height - padY - (rate / 100) * (height - padY * 2);
+
+    const overallPoints = trend.map((t, i) => ({
+      x: xFor(i),
+      y: yFor(t.total > 0 ? (t.mentioned / t.total) * 100 : 0),
+    }));
+    const overallPath = overallPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+    const enginePaths = engineKeysInTrend.map((engine) => {
+      const points = trend.map((t, i) => {
+        const stat = t.byEngine[engine];
+        const rate = stat && stat.total > 0 ? (stat.mentioned / stat.total) * 100 : null;
+        return { x: xFor(i), rate };
+      });
+      const segments: string[] = [];
+      let started = false;
+      for (const p of points) {
+        if (p.rate === null) {
+          started = false;
+          continue;
+        }
+        segments.push(`${started ? 'L' : 'M'}${p.x.toFixed(1)},${yFor(p.rate).toFixed(1)}`);
+        started = true;
+      }
+      return { engine, path: segments.join(' ') };
+    });
+
+    return { width, height, overallPath, overallPoints, enginePaths };
+  }, [trend, engineKeysInTrend]);
 
   const configuredEngines = config ? Object.entries(config.engines).filter(([, on]) => on).map(([e]) => e) : [];
   const noEnginesConfigured = config && configuredEngines.length === 0;
@@ -192,6 +287,87 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
                   })}
                 </div>
               )}
+
+              {/* Trend chart with time-range filter */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-bold text-slate-300">Mention Rate Over Time</h3>
+                  <div className="flex items-center gap-1">
+                    {timeRangeOptions.map((opt) => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setTimeRange(opt.key)}
+                        className={`px-2 py-1 text-[10px] font-mono font-semibold rounded transition-colors ${
+                          timeRange === opt.key
+                            ? 'bg-orange-600 text-white'
+                            : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {trend.length === 0 ? (
+                  <div className="rounded-lg bg-slate-800/30 py-8 text-center text-xs text-slate-600 italic">
+                    No runs in this time range yet.
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-slate-800/30 p-3">
+                    <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="w-full h-40" preserveAspectRatio="none">
+                      {/* Gridlines at 0/50/100% */}
+                      {[0, 50, 100].map((pct) => {
+                        const y = chart.height - 14 - (pct / 100) * (chart.height - 28);
+                        return (
+                          <g key={pct}>
+                            <line x1={0} y1={y} x2={chart.width} y2={y} stroke="#1e293b" strokeWidth={1} />
+                            <text x={2} y={y - 2} fontSize={9} fill="#475569" fontFamily="monospace">
+                              {pct}%
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Per-engine lines (thin) */}
+                      {chart.enginePaths.map(({ engine, path }) =>
+                        path ? (
+                          <path
+                            key={engine}
+                            d={path}
+                            fill="none"
+                            stroke={engineColor[engine] || '#64748b'}
+                            strokeWidth={1.5}
+                            strokeOpacity={0.55}
+                          />
+                        ) : null
+                      )}
+
+                      {/* Overall mention-rate line (bold) */}
+                      <path d={chart.overallPath} fill="none" stroke="#f97316" strokeWidth={2.5} />
+                      {chart.overallPoints.map((p, i) => (
+                        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#f97316" />
+                      ))}
+                    </svg>
+
+                    <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-slate-800/60">
+                      <div className="flex items-center gap-1.5 text-[10px]">
+                        <span className="w-2.5 h-0.5 bg-orange-500 inline-block"></span>
+                        <span className="text-slate-400">Overall</span>
+                      </div>
+                      {engineKeysInTrend.map((engine) => (
+                        <div key={engine} className="flex items-center gap-1.5 text-[10px]">
+                          <span
+                            className="w-2.5 h-0.5 inline-block opacity-60"
+                            style={{ backgroundColor: engineColor[engine] || '#64748b' }}
+                          ></span>
+                          <span className="text-slate-400">{engineLabel[engine] || engine}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Prompts management */}
               <div>
