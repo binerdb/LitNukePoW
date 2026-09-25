@@ -422,27 +422,39 @@ function findBrandSnippet(text: string, brand: string): string | null {
 }
 
 // Groq is free (no credit card) — https://console.groq.com/keys — and serves
-// an OpenAI-compatible /chat/completions endpoint, so both a general
-// assistant check and a web-search-grounded check (via Groq's "compound"
-// system, which browses the web server-side) use the same request shape.
+// an OpenAI-compatible /chat/completions endpoint. Both checks use the same
+// underlying model (openai/gpt-oss-120b); the search variant just turns on
+// Groq's built-in "browser_search" tool so the model looks things up live
+// instead of answering from what it already knows.
+// NOTE: Groq deprecates/retires model ids periodically (llama-3.3-70b-versatile
+// was retired Aug 2026; the old standalone "groq/compound" system was retired
+// Sep 2026 in favor of browser_search as a tool). If either check starts
+// erroring with "model_not_found" or "does not exist", check
+// https://console.groq.com/docs/models and https://console.groq.com/docs/deprecations
+// for the current replacement id and update GROQ_MODEL / GROQ_SEARCH_MODEL.
 async function queryGroqModel(
   prompt: string,
   engine: 'groq' | 'groq-search',
-  model: string
+  model: string,
+  useBrowserSearch: boolean
 ): Promise<GeoEngineResult> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return { engine, mentioned: false, snippet: null, rawAnswer: '', error: 'GROQ_API_KEY is not set.' };
   }
   try {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+    };
+    if (useBrowserSearch) {
+      body.tools = [{ type: 'browser_search' }];
+    }
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       const errText = await response.text();
@@ -463,21 +475,26 @@ async function queryGroqModel(
 
 // General assistant check (no browsing) — stands in for "ChatGPT".
 async function queryGroq(prompt: string): Promise<GeoEngineResult> {
-  return queryGroqModel(prompt, 'groq', process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
+  return queryGroqModel(prompt, 'groq', process.env.GROQ_MODEL || 'openai/gpt-oss-120b', false);
 }
 
-// Web-search-grounded check (Groq's built-in browsing) — stands in for "Perplexity".
+// Web-search-grounded check (Groq's built-in browser_search tool) — stands in for "Perplexity".
 async function queryGroqSearch(prompt: string): Promise<GeoEngineResult> {
-  return queryGroqModel(prompt, 'browser_search', process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b');
+  return queryGroqModel(prompt, 'groq-search', process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b', true);
 }
 
+// NOTE: Google also retires Gemini model ids as newer versions ship (e.g.
+// gemini-2.0-flash was retired in favor of a gemini-3.x model). If this
+// starts erroring with "is no longer available", the error message itself
+// names the current replacement — update GEMINI_MODEL to match, or check
+// https://ai.google.dev/gemini-api/docs/models for the current lineup.
 async function queryGemini(prompt: string): Promise<GeoEngineResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return { engine: 'gemini', mentioned: false, snippet: null, rawAnswer: '', error: 'GEMINI_API_KEY is not set.' };
   }
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
