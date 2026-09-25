@@ -83,7 +83,7 @@ export interface FilterState {
 // Independent checks against AI engines (do they mention the brand when
 // asked relevant questions?) — unrelated to, and never fed by, Reddit
 // account activity.
-export type GeoEngine = 'chatgpt' | 'perplexity' | 'gemini';
+export type GeoEngine = 'groq' | 'groq-search' | 'gemini';
 
 export interface GeoConfig {
   brand: string;

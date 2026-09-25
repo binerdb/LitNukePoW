@@ -406,7 +406,7 @@ const GEO_RESULTS_FILE = path.join(DATA_DIR, 'geo_results.json');
 const BRAND_NAME = process.env.GEO_BRAND_NAME || 'ANUMA AI';
 
 interface GeoEngineResult {
-  engine: 'chatgpt' | 'perplexity' | 'gemini';
+  engine: 'groq' | 'groq-search' | 'gemini';
   mentioned: boolean;
   snippet: string | null;
   rawAnswer: string;
@@ -421,67 +421,54 @@ function findBrandSnippet(text: string, brand: string): string | null {
   return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
 }
 
-async function queryChatGPT(prompt: string): Promise<GeoEngineResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
+// Groq is free (no credit card) — https://console.groq.com/keys — and serves
+// an OpenAI-compatible /chat/completions endpoint, so both a general
+// assistant check and a web-search-grounded check (via Groq's "compound"
+// system, which browses the web server-side) use the same request shape.
+async function queryGroqModel(
+  prompt: string,
+  engine: 'groq' | 'groq-search',
+  model: string
+): Promise<GeoEngineResult> {
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: 'OPENAI_API_KEY is not set.' };
+    return { engine, mentioned: false, snippet: null, rawAnswer: '', error: 'GROQ_API_KEY is not set.' };
   }
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
       }),
     });
     if (!response.ok) {
       const errText = await response.text();
-      return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+      return { engine, mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
     }
     const data = await response.json();
     const answer: string = data?.choices?.[0]?.message?.content || '';
     return {
-      engine: 'chatgpt',
+      engine,
       mentioned: answer.toLowerCase().includes(BRAND_NAME.toLowerCase()),
       snippet: findBrandSnippet(answer, BRAND_NAME),
       rawAnswer: answer,
     };
   } catch (err: any) {
-    return { engine: 'chatgpt', mentioned: false, snippet: null, rawAnswer: '', error: err.message };
+    return { engine, mentioned: false, snippet: null, rawAnswer: '', error: err.message };
   }
 }
 
-async function queryPerplexity(prompt: string): Promise<GeoEngineResult> {
-  const apiKey = process.env.PERPLEXITY_API_KEY;
-  if (!apiKey) {
-    return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: 'PERPLEXITY_API_KEY is not set.' };
-  }
-  try {
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: process.env.PERPLEXITY_MODEL || 'sonar',
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!response.ok) {
-      const errText = await response.text();
-      return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
-    }
-    const data = await response.json();
-    const answer: string = data?.choices?.[0]?.message?.content || '';
-    return {
-      engine: 'perplexity',
-      mentioned: answer.toLowerCase().includes(BRAND_NAME.toLowerCase()),
-      snippet: findBrandSnippet(answer, BRAND_NAME),
-      rawAnswer: answer,
-    };
-  } catch (err: any) {
-    return { engine: 'perplexity', mentioned: false, snippet: null, rawAnswer: '', error: err.message };
-  }
+// General assistant check (no browsing) — stands in for "ChatGPT".
+async function queryGroq(prompt: string): Promise<GeoEngineResult> {
+  return queryGroqModel(prompt, 'groq', process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
+}
+
+// Web-search-grounded check (Groq's built-in browsing) — stands in for "Perplexity".
+async function queryGroqSearch(prompt: string): Promise<GeoEngineResult> {
+  return queryGroqModel(prompt, 'groq-search', process.env.GROQ_SEARCH_MODEL || 'groq/compound');
 }
 
 async function queryGemini(prompt: string): Promise<GeoEngineResult> {
@@ -522,8 +509,8 @@ app.get('/api/geo/config', requireAuth, (_req, res) => {
     success: true,
     brand: BRAND_NAME,
     engines: {
-      chatgpt: Boolean(process.env.OPENAI_API_KEY),
-      perplexity: Boolean(process.env.PERPLEXITY_API_KEY),
+      groq: Boolean(process.env.GROQ_API_KEY),
+      'groq-search': Boolean(process.env.GROQ_API_KEY),
       gemini: Boolean(process.env.GEMINI_API_KEY),
     },
   });
@@ -558,13 +545,12 @@ app.post('/api/geo/run', requireAuth, async (_req, res) => {
     return res.status(400).json({ success: false, message: 'No prompts configured yet. Add at least one prompt first.' });
   }
 
-  const hasChatGPT = Boolean(process.env.OPENAI_API_KEY);
-  const hasPerplexity = Boolean(process.env.PERPLEXITY_API_KEY);
+  const hasGroq = Boolean(process.env.GROQ_API_KEY);
   const hasGemini = Boolean(process.env.GEMINI_API_KEY);
-  if (!hasChatGPT && !hasPerplexity && !hasGemini) {
+  if (!hasGroq && !hasGemini) {
     return res.status(400).json({
       success: false,
-      message: 'No AI engine is configured. Set OPENAI_API_KEY, PERPLEXITY_API_KEY, and/or GEMINI_API_KEY.',
+      message: 'No AI engine is configured. Set GROQ_API_KEY and/or GEMINI_API_KEY.',
     });
   }
 
@@ -574,8 +560,8 @@ app.post('/api/geo/run', requireAuth, async (_req, res) => {
 
   for (const prompt of prompts) {
     const engineChecks: Promise<GeoEngineResult>[] = [];
-    if (hasChatGPT) engineChecks.push(queryChatGPT(prompt));
-    if (hasPerplexity) engineChecks.push(queryPerplexity(prompt));
+    if (hasGroq) engineChecks.push(queryGroq(prompt));
+    if (hasGroq) engineChecks.push(queryGroqSearch(prompt));
     if (hasGemini) engineChecks.push(queryGemini(prompt));
     const engineResults = await Promise.all(engineChecks);
     for (const er of engineResults) {

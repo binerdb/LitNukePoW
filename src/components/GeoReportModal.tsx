@@ -8,14 +8,14 @@ interface GeoReportModalProps {
 }
 
 const engineLabel: Record<string, string> = {
-  chatgpt: 'ChatGPT',
-  perplexity: 'Perplexity',
+  groq: 'Groq (Llama 3.3)',
+  'groq-search': 'Groq (Web Search)',
   gemini: 'Gemini',
 };
 
 const engineColor: Record<string, string> = {
-  chatgpt: '#fb923c', // orange
-  perplexity: '#60a5fa', // blue
+  groq: '#fb923c', // orange
+  'groq-search': '#60a5fa', // blue
   gemini: '#34d399', // emerald
 };
 
@@ -207,8 +207,9 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
               GEO / AIO Visibility Report
             </h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Checks what AI engines say about{' '}
-              <span className="text-orange-400 font-semibold">{config?.brand || 'the brand'}</span>
+              Independent checks of what AI engines say about{' '}
+              <span className="text-orange-400 font-semibold">{config?.brand || 'the brand'}</span> — not connected
+              to Reddit account data.
             </p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
@@ -232,8 +233,9 @@ export const GeoReportModal: React.FC<GeoReportModalProps> = ({ onClose }) => {
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-950/30 text-amber-400 text-xs">
                   <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>
-                    No AI engine is configured yet. Set <code>OPENAI_API_KEY</code> and/or{' '}
-                    <code>PERPLEXITY_API_KEY</code> as environment variables on the server, then redeploy.
+                    No AI engine is configured yet. Set <code>GROQ_API_KEY</code> (free —{' '}
+                    console.groq.com/keys) and/or <code>GEMINI_API_KEY</code> (free — aistudio.google.com/apikey)
+                    as environment variables on the server, then redeploy.
                   </span>
                 </div>
               )}
